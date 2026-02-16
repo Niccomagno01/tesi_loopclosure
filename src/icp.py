@@ -4,6 +4,7 @@ Algoritmo ICP semplificato senza filtri complicati, solo le funzionalità essenz
 """
 import numpy as np
 from typing import Tuple, Optional, Dict, Any
+from scipy.spatial import cKDTree
 
 
 def compute_relative_transform_from_odometry(prev_pose: np.ndarray, curr_pose: np.ndarray) -> Tuple[np.ndarray, np.ndarray]:
@@ -45,41 +46,33 @@ def compute_relative_transform_from_odometry(prev_pose: np.ndarray, curr_pose: n
 
     return rotation_matrix, translation_vector
 
-
-def find_nearest_neighbors(source: np.ndarray, target: np.ndarray, max_distance: float = 0.5) -> Tuple[np.ndarray, np.ndarray]:
+def find_nearest_neighbors(source: np.ndarray, target: np.ndarray, max_distance: float = 0.5):
     """
-    Trova i nearest neighbors tra source e target.
+    Trova i nearest neighbors tra source e target utilizzando una KD-Tree
+    per accelerare la ricerca.
+
+    Per ogni punto in source viene cercato il punto più vicino in target.
+    Le corrispondenze vengono accettate solo se la distanza è minore di
+    max_distance (gating).
 
     Args:
         source: Array Nx2 di punti source
         target: Array Mx2 di punti target
-        max_distance: Distanza massima per considerare una corrispondenza
+        max_distance: Distanza massima per considerare valida una corrispondenza
 
     Returns:
         source_matched: Punti source con corrispondenza valida
         target_matched: Punti target corrispondenti
     """
+
     if len(source) == 0 or len(target) == 0:
-        return np.array([]), np.array([])
+        return np.empty((0,2)), np.empty((0,2))
 
-    # Calcola distanze euclidee per ogni punto source
-    source_matched = []
-    target_matched = []
+    tree = cKDTree(target)
+    dists, idxs = tree.query(source, k=1, distance_upper_bound=max_distance)
 
-    for i in range(len(source)):
-        # Distanze da questo punto source a tutti i target
-        distances = np.linalg.norm(target - source[i], axis=1)
-        min_idx = np.argmin(distances)
-        min_dist = distances[min_idx]
-
-        if min_dist < max_distance:
-            source_matched.append(source[i])
-            target_matched.append(target[min_idx])
-
-    if len(source_matched) == 0:
-        return np.array([]), np.array([])
-
-    return np.array(source_matched), np.array(target_matched)
+    mask = np.isfinite(dists)  # quelli oltre max_distance diventano inf
+    return source[mask], target[idxs[mask]] #type: ignore
 
 
 def compute_transformation_svd(source: np.ndarray, target: np.ndarray) -> Tuple[np.ndarray, np.ndarray]:
