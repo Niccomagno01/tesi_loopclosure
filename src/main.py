@@ -358,6 +358,68 @@ def compute_odometry_trajectory(history: np.ndarray, dt: float,
 
     return odom_traj
 
+def compute_odometry_from_commands(
+    commands: np.ndarray,
+    dt: float,
+    start_pose: np.ndarray,
+    noise_v: float = 0.01,      # deviazione standard "per secondo" (m/s)
+    noise_omega: float = 0.01,  # deviazione standard "per secondo" (rad/s)
+) -> np.ndarray:
+    """
+        Simula una traiettoria odometrica integrando i comandi di velocità lineare e angolare con integrazione di Eulero,
+        aggiungendo rumore e bias per simulare il drift.
+
+         Args:
+            commands: Array [N, 2] con comandi (v, omega) per ogni frame
+            dt: Passo temporale tra frame consecutivi (secondi)
+            start_pose: Posa iniziale (x, y, theta)
+            noise_v: deviazione standard del rumore su v.
+            noise_omega: deviazione standard del rumore su omega.
+
+        Returns:
+            Traiettoria odometrica integrata [N+1, 3] con formato (x, y, theta),
+            includendo la posa iniziale come primo elemento.
+        """
+    dt = float(dt)
+    if dt <= 0.0:
+        raise ValueError("dt deve essere > 0")
+
+    cmds = np.asarray(commands, dtype=float)  # genero array numpy
+    n = len(cmds)  # calcolo numero di comandi
+
+    out = np.zeros((n + 1, 3), dtype=float)  # preallocazione array per traiettoria odometrica
+    out[0] = np.asarray(start_pose[:3], dtype=float)  # posa iniziale (x,y,theta)
+
+    x, y, th = map(float, out[0])  # inizializzo variabili per integrazione
+
+    # bias dovuto a slittamento, raggio ruota stimato male, ecc.
+    bias_v = float(np.random.normal(0.0, 0.01))  # bias moltiplicativo su v (σ ≈ 1%)
+    bias_w = float(np.random.normal(0.0, 0.02))  # bias additivo su ω (rad/s)
+
+    sdt = math.sqrt(dt)
+
+    for k in range(n):
+        v, w = float(cmds[k, 0]), float(cmds[k, 1])
+
+        # rumore bianco discreto: noise_* è scalato con sqrt(dt)
+        if noise_v > 0.0:
+            v += float(np.random.normal(0.0, noise_v * sdt))
+        if noise_omega > 0.0:
+            w += float(np.random.normal(0.0, noise_omega * sdt))
+
+        # applico bias (drift sistematico)
+
+        v = v * (1.0 + bias_v)
+        w = w + bias_w
+
+        # integrazione di Eulero
+        x += v * math.cos(th) * dt
+        y += v * math.sin(th) * dt
+        th = _wrap_angle(th + w * dt)
+
+        out[k + 1] = [x, y, th]
+
+    return out
 
 def _build_lidars_for_cases(envs: List[Environment], titles: List[str]) -> List[Lidar]:
     """Crea una lista di Lidar per singolo caso con r_max adattivo per non coprire sempre tutti gli ostacoli.
@@ -389,7 +451,17 @@ def _build_lidars_for_cases(envs: List[Environment], titles: List[str]) -> List[
             n_rays = 300
         else:
             n_rays = 240
-        lidar = Lidar(n_rays=n_rays, angle_span=2 * math.pi, r_max=r_max, angle_offset=0.0, add_noise=False)
+
+        # Aggiunta rumore Lidar
+
+        LIDAR_RANGE_STD = 0.015 # deviazione standard del rumore sulle misure di distanza (metri)
+
+        lidar = Lidar(n_rays=n_rays,
+                      angle_span=2 * math.pi,
+                      r_max=r_max,
+                      angle_offset=0.0,
+                      add_noise=True,
+                      noise_std=LIDAR_RANGE_STD)
         lidars.append(lidar)
     return lidars
 
@@ -691,6 +763,27 @@ def main():
         histories, titles, commands_list, envs, lidars = build_cases_and_envs(dt)
 
         # ----------------
+        #CALCOLO ODOMETRIA PURA
+        # ----------------
+
+        # Parametri rumore odometrico (deviazioni standard)
+        ODOM_NOISE_V = 0.05
+        ODOM_NOISE_OMEGA = 0.05
+
+        odom_histories = []
+
+        for hist, cmds in zip(histories, commands_list):
+            start = np.asarray(hist[0], dtype=float)  # stessa posa iniziale del GT
+            odom = compute_odometry_from_commands(
+                cmds,
+                dt=dt,
+                start_pose=start,
+                noise_v=ODOM_NOISE_V,
+                noise_omega=ODOM_NOISE_OMEGA
+            )
+            odom_histories.append(odom)
+
+        # ----------------
         # SCAN-TO-MAP: se il flag è presente, esegue scan-to-map per ogni caso usando RAW e INIT come stime iniziali,
         # -----------------
 
@@ -745,10 +838,15 @@ def main():
 
                 # 1) prima scansione
                 scan0 = case_lid.scan_hits(case_hist[0], case_env, frame="local")
+
+                odom_traj = odom_histories[idx] # odometria ottenuta integrando i comandi, con rumore
+                odom_samples = [odom_traj[0].copy()] # salvo prima posa odometrica per confronto error_over_time (posizione iniziale)
+
                 if len(scan0) < 10:  # se scansione troppo vuota, inizializzo traiettorie vuote
                     traj_map_raw = np.zeros((1, 3), dtype=float)
                     traj_map_init = np.zeros((1, 3), dtype=float)
                     real_samples = np.asarray(case_hist[:1], dtype=float)
+                    odom_samples = np.asarray(odom_samples, dtype=float)
                 else:
                     map_raw = scan0.copy()
                     map_init = scan0.copy()
@@ -763,9 +861,6 @@ def main():
                     traj_map_raw = [np.array([0.0, 0.0, 0.0], dtype=float)]
                     traj_map_init = [np.array([0.0, 0.0, 0.0], dtype=float)]
                     real_samples = [case_hist[0].copy()]
-
-                    # odometry_traj è la traiettoria odometrica con drift accumulato, usata per la stima della posa iniziale di ICP INIT
-                    odom_traj = compute_odometry_trajectory(case_hist, dt=dt, noise_pos=0.01, noise_angle=0.005)
 
                     # 2) loop scan2map: allinea ogni _step frame usando RAW e INIT, con stima iniziale di INIT basata su odometria
                     for k in range(_step, len(case_hist),
@@ -848,6 +943,7 @@ def main():
                             np.array([float(t_init_stim[0]), float(t_init_stim[1]), float(th_init)], dtype=float))
 
                         real_samples.append(case_hist[k].copy())  # salva posa reale per confronto error_over_time
+                        odom_samples.append(odom_traj[k].copy())  # salva posa odometrica per confronto error_over_time
 
                         if (len(traj_map_raw) % 10) == 0:  # ogni 10 iterazioni salvo overlay scan-to-map per RAW e INIT
                             try:
@@ -872,6 +968,7 @@ def main():
                     traj_map_raw = np.vstack(traj_map_raw)
                     traj_map_init = np.vstack(traj_map_init)
                     real_samples = np.vstack(real_samples)
+                    odom_samples = np.vstack(odom_samples)
 
                 # 3) allinea le traiettorie da frame mappa a frame mondo usando la prima scansione (prima posa reale)
                 traj_world_raw = _apply_world_transform(traj_map_raw, case_hist[0])
@@ -888,7 +985,8 @@ def main():
                     out_path=visualizer.icp_out_path(
                         'trajectories',
                         f"{base_slug}_scan2map_xy.png"
-                    )
+                    ),
+                    traj_odom = odom_histories[idx][:len(case_hist)] # traiettoria odometrica da sovrapporre con lunghezza GT
                 )
 
                 save_error_over_time(
@@ -897,7 +995,8 @@ def main():
                     traj_world_raw,  # RAW
                     case_title,
                     visualizer.icp_out_path('error_over_time', f"{base_slug}_scan2map_error_over_time.png"),
-                    dt=icp_scan_interval
+                    dt=icp_scan_interval,
+                    odom_traj= odom_samples # odom campionata agli stessi k dello scan-to-map
                 )
 
             print("[SCAN-TO-MAP] Completato (RAW + INIT).", flush=True)
@@ -1032,8 +1131,10 @@ def main():
                         real_traj, icp_traj, raw_traj,
                         title,
                         visualizer.icp_out_path('error_over_time', f"{base_slug}_error_over_time.png"),
-                        dt=dt
+                        dt=dt,
+                        odom_traj = odom_histories[idx]
                     )
+
         # ===== Fine ricostruzione =====
 
         # Mostra viewer dopo tutti i salvataggi e (opzionale) ICP

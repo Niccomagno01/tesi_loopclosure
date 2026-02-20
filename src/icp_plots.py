@@ -152,10 +152,17 @@ def save_motion_arrows(res: Dict, title: str, out_path: str):
 
 # 15) Errore di posizione e orientazione nel tempo
 
-def save_error_over_time(real_traj: np.ndarray, icp_traj: np.ndarray, raw_traj: np.ndarray,
-                         title: str, out_path: str, dt: float = 0.1):
+def save_error_over_time(
+    real_traj: np.ndarray,
+    icp_traj: np.ndarray,
+    raw_traj: np.ndarray,
+    title: str,
+    out_path: str,
+    dt: float = 0.1,
+    odom_traj: np.ndarray = None,
+):
     """
-    Grafico degli errori ICP vs ground truth nel tempo.
+    Grafico degli errori di posizione e orientazione nel tempo tra ground truth, ICP (filtrato), RAW e odometria.
 
     Args:
         real_traj: Traiettoria reale (ground truth) [N x 3] con (x, y, theta)
@@ -164,28 +171,50 @@ def save_error_over_time(real_traj: np.ndarray, icp_traj: np.ndarray, raw_traj: 
         title: Titolo del grafico
         out_path: Percorso dove salvare l'immagine
         dt: Intervallo temporale tra i campioni (secondi)
+        odom_traj: Traiettoria stimata con sola odometria (dead-reckoning) [N x 3]
     """
+
     real_traj = np.asarray(real_traj, dtype=float)
     icp_traj = np.asarray(icp_traj, dtype=float)
     raw_traj = np.asarray(raw_traj, dtype=float)
 
+    # Verifica se l'odometria è stata fornita
+    use_odom = odom_traj is not None
+    if use_odom:
+        odom_traj = np.asarray(odom_traj, dtype=float)
+
     # Assicuriamoci che le traiettorie abbiano la stessa lunghezza
     n = min(len(real_traj), len(icp_traj), len(raw_traj))
+    if use_odom:
+        n = min(n, len(odom_traj))
+
     if n < 2:
         return  # Non abbastanza punti per plottare
 
     real_traj = real_traj[:n]
     icp_traj = icp_traj[:n]
     raw_traj = raw_traj[:n]
+    if use_odom:
+        odom_traj = odom_traj[:n]
 
     # Calcola il tempo
     time = np.arange(n) * dt
 
     # Calcola errore di posizione (distanza euclidea)
-    pos_error_icp = np.sqrt((real_traj[:, 0] - icp_traj[:, 0])**2 +
-                             (real_traj[:, 1] - icp_traj[:, 1])**2)
-    pos_error_raw = np.sqrt((real_traj[:, 0] - raw_traj[:, 0])**2 +
-                             (real_traj[:, 1] - raw_traj[:, 1])**2)
+    pos_error_icp = np.sqrt(
+        (real_traj[:, 0] - icp_traj[:, 0]) ** 2 +
+        (real_traj[:, 1] - icp_traj[:, 1]) ** 2
+    )
+    pos_error_raw = np.sqrt(
+        (real_traj[:, 0] - raw_traj[:, 0]) ** 2 +
+        (real_traj[:, 1] - raw_traj[:, 1]) ** 2
+    )
+
+    if use_odom:
+        pos_error_odom = np.sqrt(
+            (real_traj[:, 0] - odom_traj[:, 0]) ** 2 +
+            (real_traj[:, 1] - odom_traj[:, 1]) ** 2
+        )
 
     # Calcola errore di orientazione (differenza angolare normalizzata in [-pi, pi])
     def angle_diff(a1, a2):
@@ -195,9 +224,15 @@ def save_error_over_time(real_traj: np.ndarray, icp_traj: np.ndarray, raw_traj: 
     orient_error_icp = np.abs(angle_diff(real_traj[:, 2], icp_traj[:, 2]))
     orient_error_raw = np.abs(angle_diff(real_traj[:, 2], raw_traj[:, 2]))
 
+    if use_odom:
+        orient_error_odom = np.abs(angle_diff(real_traj[:, 2], odom_traj[:, 2]))
+
     # Converti orientazione in gradi per visualizzazione
     orient_error_icp_deg = np.degrees(orient_error_icp)
     orient_error_raw_deg = np.degrees(orient_error_raw)
+
+    if use_odom:
+        orient_error_odom_deg = np.degrees(orient_error_odom)
 
     # Crea il grafico con due subplot
     fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(10, 8))
@@ -205,6 +240,9 @@ def save_error_over_time(real_traj: np.ndarray, icp_traj: np.ndarray, raw_traj: 
     # Subplot 1: Errore di posizione
     ax1.plot(time, pos_error_icp, 'r-', linewidth=1.5, label='ICP (filtrato)')
     ax1.plot(time, pos_error_raw, 'orange', linestyle='--', linewidth=1.5, label='RAW')
+    if use_odom:
+        ax1.plot(time, pos_error_odom, linestyle=':', linewidth=1.8, label='Odometria')
+
     ax1.set_xlabel('Tempo [s]', fontsize=11)
     ax1.set_ylabel('Errore di Posizione [m]', fontsize=11)
     ax1.set_title(f'{title} - Errore di Posizione', fontsize=12, fontweight='bold')
@@ -214,13 +252,15 @@ def save_error_over_time(real_traj: np.ndarray, icp_traj: np.ndarray, raw_traj: 
     # Subplot 2: Errore di orientazione
     ax2.plot(time, orient_error_icp_deg, 'r-', linewidth=1.5, label='ICP (filtrato)')
     ax2.plot(time, orient_error_raw_deg, 'orange', linestyle='--', linewidth=1.5, label='RAW')
+    if use_odom:
+        ax2.plot(time, orient_error_odom_deg, linestyle=':', linewidth=1.8, label='Odometria')
+
     ax2.set_xlabel('Tempo [s]', fontsize=11)
     ax2.set_ylabel('Errore di Orientazione [°]', fontsize=11)
     ax2.set_title(f'{title} - Errore di Orientazione', fontsize=12, fontweight='bold')
     ax2.grid(alpha=0.3)
     ax2.legend(loc='best', fontsize=10)
 
-    plt.tight_layout()
     _savefig(out_path)
 
 def save_scan2map_overlay(map_pts, scan_aligned, title, out_path):
@@ -244,23 +284,29 @@ def save_scan2map_trajectories(
     traj_init: np.ndarray,
     traj_raw: np.ndarray,
     title: str,
-    out_path: str
+    out_path: str,
+    traj_odom: np.ndarray = None,
 ):
     plt.figure(figsize=(7, 7))
     if traj_gt is not None:
         traj_gt = np.asarray(traj_gt, dtype=float)
         if traj_gt.size:
-            plt.plot(traj_gt[:, 0], traj_gt[:, 1], "k-", linewidth=2.0, label="Ground Truth")
+            plt.plot(traj_gt[:,0], traj_gt[:,1], "-", linewidth=2.0, label="Ground Truth")
 
     if traj_init is not None:
         traj_init = np.asarray(traj_init, dtype=float)
         if traj_init.size:
-            plt.plot(traj_init[:, 0], traj_init[:, 1], "r-", linewidth=2.0, label="ICP (filtrato)")
+            plt.plot(traj_init[:,0], traj_init[:,1], "-", linewidth=2.0, label="ICP (filtrato)")
 
     if traj_raw is not None:
         traj_raw = np.asarray(traj_raw, dtype=float)
         if traj_raw.size:
             plt.plot(traj_raw[:, 0], traj_raw[:, 1], "--", linewidth=2.0, label="RAW")
+
+    if traj_odom is not None:
+        traj_odom = np.asarray(traj_odom, dtype=float)
+        if traj_odom.size:
+            plt.plot(traj_odom[:,0], traj_odom[:,1], ":", linewidth=2.2, label="Odometria")
 
     plt.axis("equal")
     plt.grid(alpha=0.3)
@@ -269,3 +315,4 @@ def save_scan2map_trajectories(
     plt.title(title)
     plt.legend(loc="best")
     _savefig(out_path, dpi=160)
+
