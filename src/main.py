@@ -358,12 +358,13 @@ def compute_odometry_trajectory(history: np.ndarray, dt: float,
 
     return odom_traj
 
+
 def compute_odometry_from_commands(
-    commands: np.ndarray,
-    dt: float,
-    start_pose: np.ndarray,
-    noise_v: float = 0.01,      # deviazione standard "per secondo" (m/s)
-    noise_omega: float = 0.01,  # deviazione standard "per secondo" (rad/s)
+        commands: np.ndarray,
+        dt: float,
+        start_pose: np.ndarray,
+        noise_v: float = 0.01,  # deviazione standard "per secondo" (m/s)
+        noise_omega: float = 0.01,  # deviazione standard "per secondo" (rad/s)
 ) -> np.ndarray:
     """
         Simula una traiettoria odometrica integrando i comandi di velocità lineare e angolare con integrazione di Eulero,
@@ -396,16 +397,14 @@ def compute_odometry_from_commands(
     bias_v = float(np.random.normal(0.0, 0.01))  # bias moltiplicativo su v (σ ≈ 1%)
     bias_w = float(np.random.normal(0.0, 0.02))  # bias additivo su ω (rad/s)
 
-    sdt = math.sqrt(dt)
-
     for k in range(n):
         v, w = float(cmds[k, 0]), float(cmds[k, 1])
 
-        # rumore bianco discreto: noise_* è scalato con sqrt(dt)
+        # applico rumore gaussiano alle velocità per simulare errori odometrici
         if noise_v > 0.0:
-            v += float(np.random.normal(0.0, noise_v * sdt))
+            v += float(np.random.normal(0.0, noise_v))  # rumore gaussiano su v (m/s)
         if noise_omega > 0.0:
-            w += float(np.random.normal(0.0, noise_omega * sdt))
+            w += float(np.random.normal(0.0, noise_omega))  # rumore gaussiano su omega (rad/s)
 
         # applico bias (drift sistematico)
 
@@ -420,6 +419,7 @@ def compute_odometry_from_commands(
         out[k + 1] = [x, y, th]
 
     return out
+
 
 def _build_lidars_for_cases(envs: List[Environment], titles: List[str]) -> List[Lidar]:
     """Crea una lista di Lidar per singolo caso con r_max adattivo per non coprire sempre tutti gli ostacoli.
@@ -454,7 +454,7 @@ def _build_lidars_for_cases(envs: List[Environment], titles: List[str]) -> List[
 
         # Aggiunta rumore Lidar
 
-        LIDAR_RANGE_STD = 0.015 # deviazione standard del rumore sulle misure di distanza (metri)
+        LIDAR_RANGE_STD = 0.015  # deviazione standard del rumore sulle misure di distanza (metri)
 
         lidar = Lidar(n_rays=n_rays,
                       angle_span=2 * math.pi,
@@ -699,6 +699,7 @@ def build_cases_and_envs(dt: float):
 
     return histories, titles, commands_list, envs, lidars
 
+
 def voxel_downsample_2d(points, voxel_size=0.05):
     """
     Downsample di punti 2d usando Voxel Grid Filter di Open3D.
@@ -763,12 +764,12 @@ def main():
         histories, titles, commands_list, envs, lidars = build_cases_and_envs(dt)
 
         # ----------------
-        #CALCOLO ODOMETRIA PURA
+        # CALCOLO ODOMETRIA PURA
         # ----------------
 
         # Parametri rumore odometrico (deviazioni standard)
-        ODOM_NOISE_V = 0.05
-        ODOM_NOISE_OMEGA = 0.05
+        ODOM_NOISE_V = 0.02  # deviazione standard del rumore sulla velocità lineare (m/s)
+        ODOM_NOISE_OMEGA = 0.02  # deviazione standard del rumore sulla velocità angolare (rad/s)
 
         odom_histories = []
 
@@ -839,8 +840,9 @@ def main():
                 # 1) prima scansione
                 scan0 = case_lid.scan_hits(case_hist[0], case_env, frame="local")
 
-                odom_traj = odom_histories[idx] # odometria ottenuta integrando i comandi, con rumore
-                odom_samples = [odom_traj[0].copy()] # salvo prima posa odometrica per confronto error_over_time (posizione iniziale)
+                odom_traj = odom_histories[idx]  # odometria ottenuta integrando i comandi, con rumore
+                odom_samples = [odom_traj[
+                                    0].copy()]  # salvo prima posa odometrica per confronto error_over_time (posizione iniziale)
 
                 if len(scan0) < 10:  # se scansione troppo vuota, inizializzo traiettorie vuote
                     traj_map_raw = np.zeros((1, 3), dtype=float)
@@ -890,7 +892,7 @@ def main():
 
                         if ok_raw:  # se ok aggiorno
                             map_raw = out_raw["map_new_raw"]
-                            if len(map_raw) > 10000: # se la mappa è troppo grande, downsample per mantenere velocità ICP
+                            if len(map_raw) > 20000:  # se la mappa è troppo grande, downsample per mantenere velocità ICP
                                 map_raw = voxel_downsample_2d(map_raw, voxel_size=0.03)
                             R_raw_stim = out_raw["raw"]["R"]
                             t_raw_stim = out_raw["raw"]["t"]
@@ -908,7 +910,7 @@ def main():
                         # calcolo predizione della posa iniziale di ICP
                         R_pred = R_init_stim @ R_delta  # moltiplico la stima precedente per il delta odometrico
                         t_pred = t_init_stim + (
-                                    R_init_stim @ t_delta)  # traslo la stima precedente del delta odometrico ruotato dalla stima precedente
+                                R_init_stim @ t_delta)  # traslo la stima precedente del delta odometrico ruotato dalla stima precedente
 
                         # ---------------- pipeline INIT ----------------
                         out_init = run_icp_scan_to_map_pair(
@@ -927,7 +929,7 @@ def main():
 
                         if ok_init:
                             map_init = out_init["map_new_init"]
-                            if len(map_init) > 10000:
+                            if len(map_init) > 20000:
                                 map_init = voxel_downsample_2d(map_init, voxel_size=0.03)
                             R_init_stim = out_init["init"]["R"]
                             t_init_stim = out_init["init"]["t"]
@@ -986,7 +988,8 @@ def main():
                         'trajectories',
                         f"{base_slug}_scan2map_xy.png"
                     ),
-                    traj_odom = odom_histories[idx][:len(case_hist)] # traiettoria odometrica da sovrapporre con lunghezza GT
+                    traj_odom=odom_histories[idx][:len(case_hist)]
+                    # traiettoria odometrica da sovrapporre con lunghezza GT
                 )
 
                 save_error_over_time(
@@ -996,7 +999,7 @@ def main():
                     case_title,
                     visualizer.icp_out_path('error_over_time', f"{base_slug}_scan2map_error_over_time.png"),
                     dt=icp_scan_interval,
-                    odom_traj= odom_samples # odom campionata agli stessi k dello scan-to-map
+                    odom_traj=odom_samples  # odom campionata agli stessi k dello scan-to-map
                 )
 
             print("[SCAN-TO-MAP] Completato (RAW + INIT).", flush=True)
@@ -1132,7 +1135,7 @@ def main():
                         title,
                         visualizer.icp_out_path('error_over_time', f"{base_slug}_error_over_time.png"),
                         dt=dt,
-                        odom_traj = odom_histories[idx]
+                        odom_traj=odom_histories[idx]
                     )
 
         # ===== Fine ricostruzione =====
