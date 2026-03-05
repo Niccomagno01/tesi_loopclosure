@@ -432,9 +432,9 @@ def _build_lidars_for_cases(envs: List[Environment], titles: List[str]) -> List[
             factor = 0.55
         elif idx == 1:  # Rettilinea v variabile
             factor = 0.40
-        elif idx in (2, 3):  # circolari
+        elif idx in (2, 3, 6):  # circolari
             factor = 0.50
-        elif idx == 4:  # otto
+        elif idx in( 4, 7):  # otto
             factor = 0.45
         else:  # random walk
             factor = 0.55
@@ -690,6 +690,28 @@ def build_cases_and_envs(dt: float):
     omega_std = omega_std_ref
     vs, omegas = tg.random_walk(v_mean=v_mean, omega_std=omega_std, T=t_rw, dt=dt, seed=456)
     _run_case("Random walk", vs, omegas)
+
+    #7) circolare circuito (v costante)
+    v = v_ref
+    r_ref = radius_ref
+    period = (2.0 * math.pi * r_ref) / max(v, 1e-9)
+    n_steps = max(1, int(round(period / dt)))
+    t_circle = n_steps * dt
+    vs, omegas = tg.circle(v=v, radius=r_ref, T=t_circle, dt=dt)
+    _run_case("Circolare (v costante) – pattern coni pista", vs, omegas)
+
+    # 8) Traiettoria a 8 CHIUSA (nuova) + birilli a coppie
+    v = v_ref
+    r_eight_closed = 1.8
+
+    period_eight = (4.0 * math.pi * r_eight_closed) / max(v, 1e-9)
+    n_steps_eight = max(2, int(round(period_eight / dt)))
+    if n_steps_eight % 2 == 1:
+        n_steps_eight += 1
+    t_eight = n_steps_eight * dt
+
+    vs, omegas = tg.eight(v=v, radius=r_eight_closed, T=t_eight, dt=dt)
+    _run_case("Traiettoria a 8 (chiusa) – pattern coni pista", vs, omegas)
 
     # Costruisci ambienti specifici per ciascuna traiettoria (usando le storie complete)
     envs = setup_environments_per_trajectory(histories, titles)
@@ -1005,7 +1027,7 @@ def main():
             print("[SCAN-TO-MAP] Completato (RAW + INIT).", flush=True)
 
         # Passi per disegnare la posa del robot (in ordine dei casi)
-        show_steps = [80, 80, 40, 40, 120, 120]
+        show_steps = [80, 80, 40, 40, 120, 120, 120, 120]
 
         # --------- Barra di progresso unica (tqdm) per tutti i salvataggi ---------
         # Calcola numero totale di immagini da salvare: traiettorie + (scans + polari) per ciascun caso

@@ -6,6 +6,7 @@ from environment import Environment
 from shapely.geometry import LineString, Point
 from shapely.geometry import Polygon as ShapelyPolygon
 from shapely.errors import TopologicalError
+from shapely.geometry import Point as ShapelyPoint
 
 
 def setup_environment(histories: List[np.ndarray]) -> Environment:
@@ -250,6 +251,17 @@ def setup_environments_per_trajectory(histories: List[np.ndarray], titles: List[
             traj8_pad = 0.30 * max(traj8_span_x, traj8_span_y, 1.0)  # 30% di padding invece di 15%
             b_left, b_bottom, b_right, b_top = traj8_x_min - traj8_pad, traj8_y_min - traj8_pad, traj8_x_max + traj8_pad, traj8_y_max + traj8_pad
 
+
+        if idx in (6,7):
+            traj_x_vals = hist[:, 0]
+            traj_y_vals = hist[:, 1]
+            x_min, x_max = float(np.min(traj_x_vals)), float(np.max(traj_x_vals))
+            y_min, y_max = float(np.min(traj_y_vals)), float(np.max(traj_y_vals))
+            span_x = max(1e-9, x_max - x_min)
+            span_y = max(1e-9, y_max - y_min)
+            pad = 0.35 * max(span_x, span_y, 1.0)  # 35% invece di 15%
+            b_left, b_bottom, b_right, b_top = x_min - pad, y_min - pad, x_max + pad, y_max + pad
+
         env_case.set_bounds(b_left, b_bottom, b_right, b_top)
 
         path_line = LineString(hist[:, :2].tolist())
@@ -260,6 +272,29 @@ def setup_environments_per_trajectory(histories: List[np.ndarray], titles: List[
             clearance *= 1.2  # Aumenta del 20% per garantire sicurezza totale
 
         path_buffer = path_line.buffer(clearance, cap_style='flat', join_style='bevel')
+
+        path_span = max(b_right - b_left, b_top - b_bottom)
+        safe_margin = 0.02 * float(path_span)
+
+        def _add_circle_safe(cx: float, cy: float, r_des: float) -> None:
+            cx = float(np.clip(cx, b_left + safe_margin, b_right - safe_margin))
+            cy = float(np.clip(cy, b_bottom + safe_margin, b_top - safe_margin))
+            r_max_bounds = float(min(cx - b_left, b_right - cx, cy - b_bottom, b_top - cy) - safe_margin)
+            r = max(0.01 * path_span, min(float(r_des), r_max_bounds))
+            it = 0
+            while it < 12:
+                geom = ShapelyPoint(cx, cy).buffer(r, resolution=32)
+                try:
+                    contains_ok = env_case.bounds.contains(geom)  # type: ignore[union-attr]
+                except (TopologicalError, AttributeError, TypeError, ValueError):
+                    contains_ok = True
+                if contains_ok and (not geom.intersects(path_buffer)) and (not _intersects_any(env_case, geom)):
+                    env_case.add_circle(cx, cy, r)
+                    return
+                r *= 0.86
+                if r < 0.02 * path_span:
+                    break
+                it += 1
 
         # La variabile 'candidates' rimane per retrocompatibilità, non usata direttamente
         # _candidates definiti per traccia storica (non usati; lasciati come riferimento)
@@ -318,27 +353,6 @@ def setup_environments_per_trajectory(histories: List[np.ndarray], titles: List[
                     float(np.clip(pt[0], b_left + safe_margin, b_right - safe_margin)),
                     float(np.clip(pt[1], b_bottom + safe_margin, b_top - safe_margin))
                 ], dtype=float)
-
-            def _add_circle_safe(cx: float, cy: float, r_des: float) -> None:
-                from shapely.geometry import Point as ShapelyPoint
-                cx = float(np.clip(cx, b_left + safe_margin, b_right - safe_margin))
-                cy = float(np.clip(cy, b_bottom + safe_margin, b_top - safe_margin))
-                r_max_bounds = float(min(cx - b_left, b_right - cx, cy - b_bottom, b_top - cy) - safe_margin)
-                r = max(0.01 * path_span, min(r_des, r_max_bounds))
-                it = 0
-                while it < 12:
-                    geom = ShapelyPoint(cx, cy).buffer(r, resolution=32)
-                    try:
-                        contains_ok = env_case.bounds.contains(geom)  # type: ignore[union-attr]
-                    except (TopologicalError, AttributeError, TypeError, ValueError):
-                        contains_ok = True
-                    if contains_ok and (not geom.intersects(path_buffer)):
-                        env_case.add_circle(cx, cy, r)
-                        return
-                    r *= 0.86
-                    if r < 0.02 * path_span:
-                        break
-                    it += 1
 
             def _add_wall_safe(a: np.ndarray, b: np.ndarray, t_des: float) -> None:
                 from shapely.geometry import LineString as ShapelyLine
@@ -546,7 +560,7 @@ def setup_environments_per_trajectory(histories: List[np.ndarray], titles: List[
                               0.85, 0.12, 0.10, 0.09, -15.0, 'triangle')  # Basso-destra
             _place_polygon_frac(env_case, b_left, b_bottom, b_right, b_top, path_line, path_buffer,
                               0.15, 0.12, 0.10, 0.09, 15.0, 'triangle')   # Basso-sinistra
-        else:
+        elif idx == 5:
             # Random walk: CONFIGURAZIONE OTTIMALE FINALE - 12 OSTACOLI (Iterazione 5)
             # VALIDATA: Migliori risultati ottenuti (RMSE RAW 0.04-0.16m, ICP 0.03-0.11m)
             # Iter. 6 (0.38-0.40) ha PEGGIORATO → ostacoli troppo grandi causano occlusione
@@ -572,6 +586,106 @@ def setup_environments_per_trajectory(histories: List[np.ndarray], titles: List[
             _place_polygon_frac(env_case, b_left, b_bottom, b_right, b_top, path_line, path_buffer, 0.68, 0.50, 0.22, 0.20, 45.0, 'L')
             _place_polygon_frac(env_case, b_left, b_bottom, b_right, b_top, path_line, path_buffer, 0.60, 0.30, 0.20, 0.22, -35.0, 'triangle')
 
+        elif idx == 6:
+            # CASO "pista" circolare: due corone di coni attorno al raggio medio della traiettoria.
+            # d=1.2*clearance controlla la larghezza pista; r_cone piccolo per evitare piazzamenti falliti e occlusioni eccessive.
+
+            pts = np.asarray(hist[:, :2], dtype=float)
+
+            cx, cy = float(np.mean(pts[:, 0])), float(np.mean(pts[:, 1]))
+            r_traj = float(np.mean(np.hypot(pts[:, 0] - cx, pts[:, 1] - cy)))
+
+            n_cones = 24
+            angles = np.linspace(0.0, 2.0 * np.pi, n_cones, endpoint=False)
+
+            # più piccoli così da essere sempre piazzati.
+            r_cone = max(0.03, 0.15 * clearance)
+
+            d = 1.2 * clearance
+
+            r_inner = max(0.2, r_traj - d)
+            r_outer = r_traj + d
+
+
+            # CORONA INTERNA
+            for a in angles:
+                x = cx + r_inner * float(np.cos(a))
+                y = cy + r_inner * float(np.sin(a))
+                _add_circle_safe(x, y, r_cone)
+
+            # CORONA ESTERNA
+            for a in angles:
+                x = cx + r_outer * float(np.cos(a))
+                y = cy + r_outer * float(np.sin(a))
+                _add_circle_safe(x, y, r_cone)
+
+        elif idx == 7:
+            # Otto chiuso: coppie di coni su normale ±d campionate lungo il path.
+            # Vincolo: coni accettati solo se distance(path_line) > clearance + r (sempre fuori dal corridoio di sicurezza, fascia nel quale non vengono piazzati ostazoli).
+
+
+            r_cone = max(0.02, 0.10 * clearance)
+
+            d = 1.05 * (clearance + r_cone)  # indica distanza dal corridoio di sicurezza
+
+            n_pairs = 25
+            L = float(path_line.length) if hasattr(path_line, "length") else 0.0
+            if L <= 1e-6:
+                print("[DEBUG idx=7] path length too small")
+            else:
+                # helper locale: accetta se è davvero "fuori" dal percorso e dentro bounds
+                def _add_circle_safe_distance(cx0: float, cy0: float, r0: float) -> None:
+                    cx0 = float(np.clip(cx0, b_left + safe_margin, b_right - safe_margin))
+                    cy0 = float(np.clip(cy0, b_bottom + safe_margin, b_top - safe_margin))
+                    r_max_bounds = float(min(cx0 - b_left, b_right - cx0, cy0 - b_bottom, b_top - cy0) - safe_margin)
+                    r = min(float(r0), r_max_bounds)  # <-- niente max(0.01*path_span)
+
+                    it = 0
+                    while it < 8:
+                        center = ShapelyPoint(cx0, cy0)
+                        if float(center.distance(path_line)) > (clearance + r):
+                            geom = center.buffer(r, resolution=32)
+                            try:
+                                contains_ok = env_case.bounds.contains(geom)  # type: ignore[union-attr]
+                            except (TopologicalError, AttributeError, TypeError, ValueError):
+                                contains_ok = True
+                            if contains_ok and (not _intersects_any(env_case, geom)):
+                                env_case.add_circle(cx0, cy0, r)
+                                return
+                        r *= 0.86
+                        if r < 0.02 * path_span:
+                            return
+                        it += 1
+
+                ds = 0.5 * (L / max(1, n_pairs))
+                for i in range(n_pairs):
+                    s = (i / n_pairs) * L
+                    s0 = max(0.0, s - ds)
+                    s1 = min(L, s + ds)
+
+                    p0 = path_line.interpolate(s0)
+                    p1 = path_line.interpolate(s1)
+
+                    tx = float(p1.x - p0.x)
+                    ty = float(p1.y - p0.y)
+                    nrm = float(np.hypot(tx, ty))
+                    if nrm < 1e-9:
+                        continue
+                    tx /= nrm
+                    ty /= nrm
+
+                    nx = -ty
+                    ny = tx
+
+                    pc = path_line.interpolate(s)
+                    x = float(pc.x)
+                    y = float(pc.y)
+
+                    _add_circle_safe_distance(x + d * nx, y + d * ny, r_cone)
+                    _add_circle_safe_distance(x - d * nx, y - d * ny, r_cone)
+
+        else:
+            pass
             # === RIEPILOGO CONFIGURAZIONE OTTIMALE ===
             # Livello 1 (vertici): 4 × 0.35-0.38 (SWEET SPOT IDENTIFICATO)
             # Livello 2 (lati): 4 × 0.12 thick
@@ -666,6 +780,10 @@ def setup_environments_per_trajectory(histories: List[np.ndarray], titles: List[
             # I 28 ostacoli primari sono già sufficienti per vincoli forti
             elif idx == 5:
                 pass  # NESSUN ostacolo aggiuntivo - evita sovrapposizioni
+            elif idx == 6:
+                pass
+            elif idx == 7:
+                pass
 
         # Per la traiettoria a 8: NON aggiungere altri ostacoli oltre a quelli già definiti
         if is_eight:
