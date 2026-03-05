@@ -310,72 +310,18 @@ def apply_loop_closure_correction(trajectory: np.ndarray, is_circular: bool = Fa
     return corrected
 
 
-def compute_odometry_trajectory(history: np.ndarray, dt: float,
-                                noise_pos: float = 0.01,
-                                noise_angle: float = 0.005) -> np.ndarray:
-    """
-    Simula una traiettoria odometrica con drift accumulato a partire dal ground truth.
-
-    Questa funzione prende la traiettoria reale del robot e simula come sarebbe
-    la traiettoria ricostruita usando solo odometria, aggiungendo rumore alle
-    velocità lineari e angolari per simulare il drift caratteristico dei sensori
-    odometrici.
-
-    Args:
-        history: Traiettoria ground truth [N, 3] con formato (x, y, theta)
-        dt: Passo temporale tra frame consecutivi (secondi)
-        noise_pos: Deviazione standard del rumore sulla velocità lineare (m/s)
-        noise_angle: Deviazione standard del rumore sulla velocità angolare (rad/s)
-
-    Returns:
-        Traiettoria odometrica con drift accumulato [N, 3]
-    """
-    odom_traj = np.zeros_like(history)
-    odom_traj[0] = history[0].copy()  # Stessa posizione di partenza
-
-    for k in range(1, len(history)):
-        # Calcola il movimento reale tra i frame k-1 e k
-        dx_real = history[k, 0] - history[k - 1, 0]
-        dy_real = history[k, 1] - history[k - 1, 1]
-        dtheta_real = history[k, 2] - history[k - 1, 2]
-
-        # Calcola velocità reali dal movimento ground truth
-        v_real = np.sqrt(dx_real ** 2 + dy_real ** 2) / dt
-        omega_real = dtheta_real / dt
-
-        # Aggiungi rumore gaussiano alle velocità per simulare errori odometrici
-        v_noisy = v_real + np.random.normal(0, noise_pos)
-        omega_noisy = omega_real + np.random.normal(0, noise_angle)
-
-        # Integra con Eulero usando le velocità rumorose
-        theta_prev = odom_traj[k - 1, 2]
-        odom_traj[k, 0] = odom_traj[k - 1, 0] + v_noisy * np.cos(theta_prev) * dt
-        odom_traj[k, 1] = odom_traj[k - 1, 1] + v_noisy * np.sin(theta_prev) * dt
-        odom_traj[k, 2] = odom_traj[k - 1, 2] + omega_noisy * dt
-
-        # Normalizza angolo nell'intervallo [-π, π]
-        odom_traj[k, 2] = _wrap_angle(float(odom_traj[k, 2]))
-
-    return odom_traj
-
-
 def compute_odometry_from_commands(
         commands: np.ndarray,
         dt: float,
         start_pose: np.ndarray,
-        noise_v: float = 0.01,  # deviazione standard "per secondo" (m/s)
-        noise_omega: float = 0.01,  # deviazione standard "per secondo" (rad/s)
 ) -> np.ndarray:
     """
-        Simula una traiettoria odometrica integrando i comandi di velocità lineare e angolare con integrazione di Eulero,
-        aggiungendo rumore e bias per simulare il drift.
+        Simula una traiettoria odometrica integrando i comandi di velocità lineare e angolare con integrazione di Eulero.
 
          Args:
             commands: Array [N, 2] con comandi (v, omega) per ogni frame
             dt: Passo temporale tra frame consecutivi (secondi)
             start_pose: Posa iniziale (x, y, theta)
-            noise_v: deviazione standard del rumore su v.
-            noise_omega: deviazione standard del rumore su omega.
 
         Returns:
             Traiettoria odometrica integrata [N+1, 3] con formato (x, y, theta),
@@ -393,23 +339,8 @@ def compute_odometry_from_commands(
 
     x, y, th = map(float, out[0])  # inizializzo variabili per integrazione
 
-    # bias dovuto a slittamento, raggio ruota stimato male, ecc.
-    bias_v = float(np.random.normal(0.0, 0.01))  # bias moltiplicativo su v (σ ≈ 1%)
-    bias_w = float(np.random.normal(0.0, 0.02))  # bias additivo su ω (rad/s)
-
     for k in range(n):
         v, w = float(cmds[k, 0]), float(cmds[k, 1])
-
-        # applico rumore gaussiano alle velocità per simulare errori odometrici
-        if noise_v > 0.0:
-            v += float(np.random.normal(0.0, noise_v))  # rumore gaussiano su v (m/s)
-        if noise_omega > 0.0:
-            w += float(np.random.normal(0.0, noise_omega))  # rumore gaussiano su omega (rad/s)
-
-        # applico bias (drift sistematico)
-
-        v = v * (1.0 + bias_v)
-        w = w + bias_w
 
         # integrazione di Eulero
         x += v * math.cos(th) * dt
@@ -434,7 +365,7 @@ def _build_lidars_for_cases(envs: List[Environment], titles: List[str]) -> List[
             factor = 0.40
         elif idx in (2, 3, 6):  # circolari
             factor = 0.50
-        elif idx in( 4, 7):  # otto
+        elif idx in (4, 7):  # otto
             factor = 0.45
         else:  # random walk
             factor = 0.55
@@ -691,7 +622,7 @@ def build_cases_and_envs(dt: float):
     vs, omegas = tg.random_walk(v_mean=v_mean, omega_std=omega_std, T=t_rw, dt=dt, seed=456)
     _run_case("Random walk", vs, omegas)
 
-    #7) circolare circuito (v costante)
+    # 7) circolare circuito (v costante)
     v = v_ref
     r_ref = radius_ref
     period = (2.0 * math.pi * r_ref) / max(v, 1e-9)
@@ -750,6 +681,44 @@ def voxel_downsample_2d(points, voxel_size=0.05):
     return down[:, :2]  # Torna in 2D
 
 
+def disturb_commands(
+        commands: np.ndarray,
+        noise_v: float = 0.01,  # deviazione standard su v (m/s)
+        noise_omega: float = 0.01,  # deviazione standard su omega (rad/s)
+        bias_v_std: float = 0.01,  # deviazione standard bias moltiplicativo v (≈1%)
+        bias_w_std: float = 0.02,  # deviazione standard bias additivo omega (rad/s)
+        rng: Optional[np.random.Generator] = None
+) -> np.ndarray:
+    """
+    Disturba i comandi (v, omega) aggiungendo rumore e bias.
+    Restituisce nuovi comandi disturbati, mantenendo la stessa forma dell'input.
+    """
+    cmds = np.asarray(commands, dtype=float)
+    if cmds.ndim != 2 or cmds.shape[1] < 2:
+        raise ValueError("commands deve essere un array Nx2 (v, omega)")
+
+    if rng is None:
+        rng = np.random.default_rng()
+
+    # bias fisso per tutta la traiettoria (drift sistematico)
+    bias_v = float(rng.normal(0.0, bias_v_std))  # moltiplicativo su v
+    bias_w = float(rng.normal(0.0, bias_w_std))  # additivo su omega
+
+    noisy = cmds.copy()
+
+    # rumore gaussiano indipendente per ogni comando (v, omega) e per ogni frame
+    if noise_v > 0.0:
+        noisy[:, 0] += rng.normal(0.0, noise_v, size=len(noisy))
+    if noise_omega > 0.0:
+        noisy[:, 1] += rng.normal(0.0, noise_omega, size=len(noisy))
+
+    # applica bias
+    noisy[:, 0] = noisy[:, 0] * (1.0 + bias_v)  # moltiplicativo su v
+    noisy[:, 1] = noisy[:, 1] + bias_w  # additivo su omega
+
+    return noisy
+
+
 def main():
     args = parse_args()
 
@@ -790,20 +759,32 @@ def main():
         # ----------------
 
         # Parametri rumore odometrico (deviazioni standard)
-        ODOM_NOISE_V = 0.02  # deviazione standard del rumore sulla velocità lineare (m/s)
-        ODOM_NOISE_OMEGA = 0.02  # deviazione standard del rumore sulla velocità angolare (rad/s)
+        ODOM_NOISE_V = 0.03  # deviazione standard del rumore sulla velocità lineare (m/s)
+        ODOM_NOISE_OMEGA = 0.03  # deviazione standard del rumore sulla velocità angolare (rad/s)
+        ODOM_BIAS_V = 0.03  # deviazione standard del bias moltiplicativo sulla velocità lineare (≈2%)
+        ODOM_BIAS_OMEGA = 0.03  # deviazione standard del bias additivo sulla velocità angolare (rad/s)
 
         odom_histories = []
 
+        rng = np.random.default_rng(seed=1234)  # aggiunta di un seme per la riproducibilità del rumore odometrico
         for hist, cmds in zip(histories, commands_list):
-            start = np.asarray(hist[0], dtype=float)  # stessa posa iniziale del GT
-            odom = compute_odometry_from_commands(
+            start = np.asarray(hist[0], dtype=float)
+
+            noisy_cmds = disturb_commands(
                 cmds,
-                dt=dt,
-                start_pose=start,
                 noise_v=ODOM_NOISE_V,
-                noise_omega=ODOM_NOISE_OMEGA
+                noise_omega=ODOM_NOISE_OMEGA,
+                bias_v_std=ODOM_BIAS_V,
+                bias_w_std=ODOM_BIAS_OMEGA,
+                rng=rng
             )
+
+            odom = compute_odometry_from_commands(
+                noisy_cmds,
+                dt=dt,
+                start_pose=start
+            )
+
             odom_histories.append(odom)
 
         # ----------------
