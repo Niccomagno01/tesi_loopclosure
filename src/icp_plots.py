@@ -68,8 +68,8 @@ def save_alignment_overlays(res: Dict, title: str, out_path: str):
     src_raw_none = np.asarray(res['raw_none']['src_transformed'])
     plt.figure(figsize=(6, 5))
     plt.scatter(tgt[:, 0], tgt[:, 1], s=10, c='k', label='Target (k-1)')
-    plt.scatter(src_none[:, 0], src_none[:, 1], s=8, c='tab:red', alpha=0.7, label='ICP (filtrato)')
-    plt.scatter(src_raw_none[:, 0], src_raw_none[:, 1], s=8, c='tab:orange', alpha=0.5, label='RAW')
+    plt.scatter(src_none[:, 0], src_none[:, 1], s=8, c='tab:red', alpha=0.7, label='ICP (odometria)')
+    plt.scatter(src_raw_none[:, 0], src_raw_none[:, 1], s=8, c='tab:orange', alpha=0.5, label='ICP')
     plt.axis('equal'); plt.grid(alpha=0.3)
     plt.title(title)
     plt.legend(loc='upper right', fontsize=8)
@@ -83,8 +83,8 @@ def save_convergence_curves(res: Dict, title: str, out_path: str):
     e_none = np.asarray(res['none'].get('errors', res['none'].get('errs', [])))
     e_rawn = np.asarray(res['raw_none'].get('errors', res['raw_none'].get('errs', [])))
     plt.figure(figsize=(6, 4))
-    if e_none.size: plt.plot(e_none, label='ICP (filtrato)')
-    if e_rawn.size: plt.plot(e_rawn, '--', label='RAW')
+    if e_none.size: plt.plot(e_none, label='ICP (odometria)')
+    if e_rawn.size: plt.plot(e_rawn, '--', label='ICP')
     plt.xlabel('Iterazione'); plt.ylabel('RMSE')
     plt.title(title)
     plt.grid(alpha=0.3); plt.legend()
@@ -238,8 +238,8 @@ def save_error_over_time(
     fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(10, 8))
 
     # Subplot 1: Errore di posizione
-    ax1.plot(time, pos_error_icp, 'r-', linewidth=1.5, label='ICP (filtrato)')
-    ax1.plot(time, pos_error_raw, 'orange', linestyle='--', linewidth=1.5, label='RAW')
+    ax1.plot(time, pos_error_icp, 'r-', linewidth=1.5, label='ICP (odometria)')
+    ax1.plot(time, pos_error_raw, 'orange', linestyle='--', linewidth=1.5, label='ICP')
     if use_odom:
         ax1.plot(time, pos_error_odom, linestyle=':', linewidth=1.8, label='Odometria')
 
@@ -250,8 +250,8 @@ def save_error_over_time(
     ax1.legend(loc='best', fontsize=10)
 
     # Subplot 2: Errore di orientazione
-    ax2.plot(time, orient_error_icp_deg, 'r-', linewidth=1.5, label='ICP (filtrato)')
-    ax2.plot(time, orient_error_raw_deg, 'orange', linestyle='--', linewidth=1.5, label='RAW')
+    ax2.plot(time, orient_error_icp_deg, 'r-', linewidth=1.5, label='ICP (odometria)')
+    ax2.plot(time, orient_error_raw_deg, 'orange', linestyle='--', linewidth=1.5, label='ICP')
     if use_odom:
         ax2.plot(time, orient_error_odom_deg, linestyle=':', linewidth=1.8, label='Odometria')
 
@@ -296,12 +296,12 @@ def save_scan2map_trajectories(
     if traj_init is not None:
         traj_init = np.asarray(traj_init, dtype=float)
         if traj_init.size:
-            plt.plot(traj_init[:,0], traj_init[:,1], "-", linewidth=2.0, label="ICP (filtrato)")
+            plt.plot(traj_init[:,0], traj_init[:,1], "-", linewidth=2.0, label="ICP (odometria)")
 
     if traj_raw is not None:
         traj_raw = np.asarray(traj_raw, dtype=float)
         if traj_raw.size:
-            plt.plot(traj_raw[:, 0], traj_raw[:, 1], "--", linewidth=2.0, label="RAW")
+            plt.plot(traj_raw[:, 0], traj_raw[:, 1], "--", linewidth=2.0, label="ICP")
 
     if traj_odom is not None:
         traj_odom = np.asarray(traj_odom, dtype=float)
