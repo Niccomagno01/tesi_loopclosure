@@ -21,6 +21,12 @@ import math
 import numpy as np
 import sys, os
 import datetime as _dt
+from loop_closure import (pose_to_rt,
+                          should_create_keyframe,
+                          find_loop_candidate,
+                          try_loop_closure,
+                          Keyframe,
+                          add_keyframe)
 
 # Nuovo: inizializza colorama per garantire rendering ANSI su Windows
 try:
@@ -256,58 +262,6 @@ def _env_bounds_diag(env: Environment) -> float:
         return float((w * w + h * h) ** 0.5)
     except (AttributeError, TypeError, ValueError):
         return 10.0
-
-
-def apply_loop_closure_correction(trajectory: np.ndarray, is_circular: bool = False,
-                                  closure_threshold: float = 0.3) -> np.ndarray:
-    """
-    Applica correzione di loop closure per traiettorie circolari.
-    Se il punto finale è vicino all'inizio, distribuisce l'errore lungo tutta la traiettoria.
-
-    Args:
-        trajectory: Array Nx3 [x, y, theta]
-        is_circular: Se True, forza la chiusura del loop
-        closure_threshold: Distanza massima per considerare il loop chiuso (metri)
-
-    Returns:
-        Traiettoria corretta
-    """
-    if len(trajectory) < 10 or not is_circular:
-        return trajectory
-
-    # Controlla se il loop è quasi chiuso
-    start = trajectory[0, :2]
-    end = trajectory[-1, :2]
-    distance = np.linalg.norm(end - start)
-
-    if distance > closure_threshold:
-        # Loop non abbastanza vicino, non correggere
-        return trajectory
-
-    # Calcola errore totale
-    error_xy = start - end
-    error_theta = trajectory[0, 2] - trajectory[-1, 2]
-
-    # Normalizza errore angolare a [-pi, pi]
-    while error_theta > np.pi:
-        error_theta -= 2 * np.pi
-    while error_theta < -np.pi:
-        error_theta += 2 * np.pi
-
-    # Distribuisci la correzione linearmente lungo la traiettoria
-    corrected = trajectory.copy()
-    n = len(trajectory)
-
-    for i in range(1, n):
-        # Frazione del percorso completato
-        alpha = float(i) / float(n - 1)
-
-        # Applica correzione proporzionale
-        corrected[i, 0] += alpha * error_xy[0]
-        corrected[i, 1] += alpha * error_xy[1]
-        corrected[i, 2] += alpha * error_theta
-
-    return corrected
 
 
 def compute_odometry_from_commands(
@@ -798,7 +752,7 @@ def main():
         scan2map_ncases = 0  # per viewer
 
         if getattr(args, "run_scan2map", False):
-            print("\n[SCAN-TO-MAP] Avvio calcolo scan-to-map (RAW + INIT)...", flush=True)
+            print("\n[SCAN-TO-MAP] Avvio calcolo scan-to-map (ICP + ICP con odometria)...", flush=True)
 
             # --- Parametri scan-to-map (globali per tutti i casi) ---
 
@@ -817,6 +771,17 @@ def main():
             _thr_raw = 0.25
             _corr_init = 40
             _thr_init = 0.20
+
+            # --- Parametri keyframe / loop closure ---
+            _kf_dist = 0.5  # distanza minima tra keyframe per crearne uno nuovo [m]
+            _kf_angle = np.deg2rad(15.0)  # differenza angolare minima tra keyframe [rad]
+
+            _loop_min_separation = 50  # numero minimo di frame tra due keyframe per cercare una loop closure
+            _loop_search_radius = 0.8  # raggio massimo di ricerca del keyframe candidato [m]
+            _loop_max_corr_dist = 0.30  # distanza massima per una corrispondenza valida durante ICP
+            _loop_max_rmse = 0.10  # RMSE massimo per accettare una loop closure
+            _loop_min_fitness = 0.90  # fitness minima per accettare una loop closure
+            _loop_cooldown = 30  # numero di frame da attendere dopo una loop closure accettata
 
             # liste per memorizzare le traiettrie
 
@@ -866,6 +831,21 @@ def main():
                     traj_map_raw = [np.array([0.0, 0.0, 0.0], dtype=float)]
                     traj_map_init = [np.array([0.0, 0.0, 0.0], dtype=float)]
                     real_samples = [case_hist[0].copy()]
+
+                    # --- Keyframe / loop closure state ---
+                    keyframes: List[Keyframe] = [] # lista dei keyframe creati, con pose e scansioni
+                    last_kf_pose: Optional[np.ndarray] = None # ultima posa associata a un keyframe
+                    last_loop_k = -10 ** 9 # ultimo frame in cui è stato accettato loop closure
+
+                    # Primo keyframe = prima scansione
+                    kf0 = add_keyframe(
+                        keyframes=keyframes,
+                        k=0,
+                        pose=np.array([0.0, 0.0, 0.0], dtype=float),
+                        scan_local=scan0,
+                    ) # primo keyframe nel frame locale
+                    last_kf_pose = kf0.pose.copy() # aggiorno ultima posa keyframe
+
 
                     # 2) loop scan2map: allinea ogni _step frame usando RAW e INIT, con stima iniziale di INIT basata su odometria
                     for k in range(_step, len(case_hist),
@@ -949,6 +929,67 @@ def main():
 
                         real_samples.append(case_hist[k].copy())  # salva posa reale per confronto error_over_time
                         odom_samples.append(odom_traj[k].copy())  # salva posa odometrica per confronto error_over_time
+
+                        # ----------------
+                        # KEYFRAME + LOOP CLOSURE
+                        # -----------------
+
+                        curr_pose_map = traj_map_init[-1].copy() # assegna posa corrente
+
+                        # 1) crea keyframe se ci sono le condizioni necessarie (distanza o angolo dalla posa dell'ultimo keyframe)
+                        if should_create_keyframe(
+                                curr_pose=curr_pose_map,
+                                last_kf_pose=last_kf_pose,
+                                dist_thresh=_kf_dist,
+                                angle_thresh=_kf_angle,
+                        ):
+                            new_kf = add_keyframe(
+                                keyframes=keyframes,
+                                k=k,
+                                pose=curr_pose_map,
+                                scan_local=scan_k,
+                            )
+                            last_kf_pose = new_kf.pose.copy() # aggiorno ultima posa keyframe
+
+                            # 2) se è passato abbastanza tempo aggiorna altrimenti rifiuta
+                            if (k - last_loop_k) >= _loop_cooldown:
+                                candidate_kf = find_loop_candidate(
+                                    curr_pose=curr_pose_map,
+                                    keyframes=keyframes[:-1],  # esclude il keyframe appena aggiunto
+                                    curr_k=k,
+                                    min_separation=_loop_min_separation,
+                                    search_radius=_loop_search_radius,
+                                )
+
+                                # 3) verifica il loop con ICP Open3D
+                                if candidate_kf is not None:
+                                    loop_res = try_loop_closure(
+                                        curr_scan_local=scan_k,
+                                        curr_pose_pred=curr_pose_map,
+                                        candidate_kf=candidate_kf,
+                                        max_corr_dist=_loop_max_corr_dist,
+                                        max_rmse=_loop_max_rmse,
+                                        min_fitness=_loop_min_fitness,
+                                    )
+
+                                    if loop_res is not None:
+                                        corrected_pose = loop_res["pose_corrected"]
+
+                                        # sostituisci la posa corrente con quella corretta (per correggere errore drift odometrico e ICP)
+                                        traj_map_init[-1] = corrected_pose.copy()
+
+                                        # aggiorna anche lo stato corrente per i frame successivi
+                                        R_init_stim, t_init_stim = pose_to_rt(corrected_pose) # aggiorno stima corrente con posa corretta da loop closure
+                                        th_init = float(corrected_pose[2])
+
+                                        last_loop_k = k
+
+                                        print(
+                                            f"[LOOP] {case_title} | k={k} | "
+                                            f"kf={candidate_kf.k} | "
+                                            f"rmse={loop_res['rmse']:.4f} | "
+                                            f"fitness={loop_res['fitness']:.3f}"
+                                        )
 
                         if (len(traj_map_raw) % 10) == 0:  # ogni 10 iterazioni salvo overlay scan-to-map per RAW e INIT
                             try:
@@ -1109,13 +1150,6 @@ def main():
                 real_f = real if isinstance(real, np.ndarray) and real.size > 0 else np.zeros((1, 3), dtype=float)
                 raw_f = raw if isinstance(raw, np.ndarray) and raw.size > 0 else np.zeros((1, 3), dtype=float)
                 icp_f = icp if isinstance(icp, np.ndarray) and icp.size > 0 else np.zeros((1, 3), dtype=float)
-
-                # Applica loop closure correction SOLO per traiettorie circolari (idx 2, 3)
-                # NON applicare al caso 4 (otto) perché ha una forma diversa
-                # is_circular = idx in (2, 3)
-                # if is_circular and len(icp_f) > 10:
-                #   icp_f = apply_loop_closure_correction(icp_f, is_circular=True, closure_threshold=0.5)
-                #  raw_f = apply_loop_closure_correction(raw_f, is_circular=True, closure_threshold=0.5)
 
                 # Allineamento opzionale al mondo: usa la prima posa reale del caso simulato
                 if getattr(args, 'viewer_log_align_world', False) and idx < len(histories) and len(histories[idx]) > 0:
