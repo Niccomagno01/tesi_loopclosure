@@ -291,7 +291,7 @@ def save_scan2map_trajectories(
     if traj_gt is not None:
         traj_gt = np.asarray(traj_gt, dtype=float)
         if traj_gt.size:
-            plt.plot(traj_gt[:,0], traj_gt[:,1], "-", linewidth=2.0, label="Ground Truth")
+            plt.plot(traj_gt[:,0], traj_gt[:,1], "-", linewidth=2.0, label="Traiettoria reale (GT)")
 
     if traj_init is not None:
         traj_init = np.asarray(traj_init, dtype=float)

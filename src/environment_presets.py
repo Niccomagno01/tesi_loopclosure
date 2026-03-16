@@ -481,13 +481,13 @@ def setup_environments_per_trajectory(histories: List[np.ndarray], titles: List[
 
             # ZONA MEDIO-BASSA (Y=0.35-0.45) - 3 grandi ostacoli
             _place_polygon_frac(env_case, b_left, b_bottom, b_right, b_top, path_line, path_buffer, 0.75, 0.38, 0.17, 0.14, 35.0, 'triangle')  # GRANDE triangolo destra
-            _place_wall_frac(env_case, b_left, b_bottom, b_right, b_top, path_line, path_buffer, 0.20, 0.40, 0.26, 0.44, 0.05)  # Muro SPESSO sinistra
+            _place_wall_frac(env_case, b_left, b_bottom, b_right, b_top, path_line, path_buffer, 0.20, 0.30, 0.26, 0.34, 0.05)  # Muro SPESSO sinistra
             _place_polygon_frac(env_case, b_left, b_bottom, b_right, b_top, path_line, path_buffer, 0.85, 0.42, 0.16, 0.13, -25.0, 'L')  # L destra
 
             # ZONA CENTRALE (Y=0.50-0.60) - 4 grandi ostacoli DISTINTIVI
             _place_circle_frac(env_case, b_left, b_bottom, b_right, b_top, path_line, path_buffer, 0.30, 0.52, 0.070)  # GRANDE cerchio sinistra
             _place_polygon_frac(env_case, b_left, b_bottom, b_right, b_top, path_line, path_buffer, 0.72, 0.55, 0.18, 0.15, -20.0, 'L')  # GRANDE L destra
-            _place_wall_frac(env_case, b_left, b_bottom, b_right, b_top, path_line, path_buffer, 0.15, 0.56, 0.19, 0.60, 0.05)  # Muro sinistra
+            #_place_wall_frac(env_case, b_left, b_bottom, b_right, b_top, path_line, path_buffer, 0.15, 0.56, 0.19, 0.60, 0.05)  # Muro sinistra
             _place_polygon_frac(env_case, b_left, b_bottom, b_right, b_top, path_line, path_buffer, 0.85, 0.58, 0.15, 0.13, 30.0, 'triangle')  # Triangolo destra
 
             # ZONA MEDIO-ALTA (Y=0.65-0.75) - 3 grandi ostacoli
@@ -578,7 +578,7 @@ def setup_environments_per_trajectory(histories: List[np.ndarray], titles: List[
             _place_wall_frac(env_case, b_left, b_bottom, b_right, b_top, path_line, path_buffer, 0.12, 0.38, 0.12, 0.62, 0.12)
             _place_wall_frac(env_case, b_left, b_bottom, b_right, b_top, path_line, path_buffer, 0.88, 0.38, 0.88, 0.62, 0.12)
             _place_wall_frac(env_case, b_left, b_bottom, b_right, b_top, path_line, path_buffer, 0.38, 0.12, 0.62, 0.12, 0.12)
-            _place_wall_frac(env_case, b_left, b_bottom, b_right, b_top, path_line, path_buffer, 0.38, 0.88, 0.62, 0.88, 0.12)
+            #_place_wall_frac(env_case, b_left, b_bottom, b_right, b_top, path_line, path_buffer, 0.38, 0.88, 0.62, 0.88, 0.12)
 
             # === LIVELLO 3: 4 OSTACOLI GRANDI STRATEGICI (dimensioni 0.22-0.26) ===
             _place_polygon_frac(env_case, b_left, b_bottom, b_right, b_top, path_line, path_buffer, 0.30, 0.35, 0.26, 0.24, -25.0, 'L')
@@ -601,7 +601,7 @@ def setup_environments_per_trajectory(histories: List[np.ndarray], titles: List[
             # più piccoli così da essere sempre piazzati.
             r_cone = max(0.03, 0.15 * clearance)
 
-            d = 1.2 * clearance
+            d = 1.3 * clearance
 
             r_inner = max(0.2, r_traj - d)
             r_outer = r_traj + d
@@ -633,6 +633,15 @@ def setup_environments_per_trajectory(histories: List[np.ndarray], titles: List[
             if L <= 1e-6:
                 print("[DEBUG idx=7] path length too small")
             else:
+                def _too_close_to_existing(cx0: float, cy0: float, min_dist: float) -> bool:
+                    p = ShapelyPoint(cx0, cy0)
+                    for ob in env_case.obstacles:
+                        try:
+                            if p.distance(ob) < min_dist:
+                                return True
+                        except (TopologicalError, AttributeError, TypeError, ValueError):
+                            continue
+                    return False
                 # helper locale: accetta se è davvero "fuori" dal percorso e dentro bounds
                 def _add_circle_safe_distance(cx0: float, cy0: float, r0: float) -> None:
                     cx0 = float(np.clip(cx0, b_left + safe_margin, b_right - safe_margin))
@@ -650,7 +659,8 @@ def setup_environments_per_trajectory(histories: List[np.ndarray], titles: List[
                             except (TopologicalError, AttributeError, TypeError, ValueError):
                                 contains_ok = True
                             if contains_ok and (not _intersects_any(env_case, geom)):
-                                env_case.add_circle(cx0, cy0, r)
+                                if not _too_close_to_existing(cx0, cy0, 2.2 * r):
+                                    env_case.add_circle(cx0, cy0, r)
                                 return
                         r *= 0.86
                         if r < 0.02 * path_span:

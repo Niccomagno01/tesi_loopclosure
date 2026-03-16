@@ -515,6 +515,14 @@ def build_cases_and_envs(dt: float):
     v_max_ref = 1.6
     omega_std_ref = 0.8
 
+    # Parametri disturbo sui comandi del robot
+    ODOM_NOISE_V = 0.03
+    ODOM_NOISE_OMEGA = 0.03
+    ODOM_BIAS_V = 0.03
+    ODOM_BIAS_OMEGA = 0.03
+
+    rng = np.random.default_rng(seed=1234)
+
     tg = TrajectoryGenerator()  # Generatore delle traiettorie
     sim = build_simulator()  # Simulatore con robot iniziale di default
 
@@ -524,8 +532,31 @@ def build_cases_and_envs(dt: float):
 
     def _run_case(title: str, vs, omegas):
         reset_robot_default(sim)
-        histories.append(sim.run_from_sequence(vs, omegas, dt))
-        commands_list.append(sim.commands)
+
+        # comandi nominali (puliti)
+        cmds_nom = np.column_stack([vs, omegas])
+
+        # comandi disturbati da applicare al robot
+        cmds_dist = disturb_commands(
+            cmds_nom,
+            noise_v=ODOM_NOISE_V,
+            noise_omega=ODOM_NOISE_OMEGA,
+            bias_v_std=ODOM_BIAS_V,
+            bias_w_std=ODOM_BIAS_OMEGA,
+            rng=rng
+        )
+
+        # traiettoria reale del robot(comandi disturbati)
+        hist = sim.run_from_sequence(
+            vs,
+            omegas,
+            dt,
+            vs_applied=cmds_dist[:, 0],
+            omegas_applied=cmds_dist[:, 1]
+        )
+
+        histories.append(hist)
+        commands_list.append(sim.commands.copy())   # salvo i comandi puliti
         titles.append(title)
 
     # 1) Rettilinea (v costante)
@@ -711,30 +742,14 @@ def main():
         # ----------------
         # CALCOLO ODOMETRIA PURA
         # ----------------
-
-        # Parametri rumore odometrico (deviazioni standard)
-        ODOM_NOISE_V = 0.03  # deviazione standard del rumore sulla velocità lineare (m/s)
-        ODOM_NOISE_OMEGA = 0.03  # deviazione standard del rumore sulla velocità angolare (rad/s)
-        ODOM_BIAS_V = 0.03  # deviazione standard del bias moltiplicativo sulla velocità lineare (≈2%)
-        ODOM_BIAS_OMEGA = 0.03  # deviazione standard del bias additivo sulla velocità angolare (rad/s)
-
         odom_histories = []
 
-        rng = np.random.default_rng(seed=1234)  # aggiunta di un seme per la riproducibilità del rumore odometrico
         for hist, cmds in zip(histories, commands_list):
             start = np.asarray(hist[0], dtype=float)
 
-            noisy_cmds = disturb_commands(
-                cmds,
-                noise_v=ODOM_NOISE_V,
-                noise_omega=ODOM_NOISE_OMEGA,
-                bias_v_std=ODOM_BIAS_V,
-                bias_w_std=ODOM_BIAS_OMEGA,
-                rng=rng
-            )
-
+            # ODOMETRIA CON COMANDI IDEAL
             odom = compute_odometry_from_commands(
-                noisy_cmds,
+                cmds,
                 dt=dt,
                 start_pose=start
             )
