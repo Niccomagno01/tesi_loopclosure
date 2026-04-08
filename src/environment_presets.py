@@ -451,7 +451,7 @@ def setup_environments_per_trajectory(histories: List[np.ndarray], titles: List[
             _add_triangle_safe(c_t[0], c_t[1], 0.10 * path_span, 0.12 * path_span, angle_deg=15.0)
 
             c_r = _interp_point(0.80) - 0.90 * d_off * n_hat
-            _add_rot_rect_safe(c_r[0], c_r[1], 0.18 * path_span, 0.08 * path_span, angle_deg=-20.0)
+            #_add_rot_rect_safe(c_r[0], c_r[1], 0.18 * path_span, 0.08 * path_span, angle_deg=-20.0)
 
             c_t_sym = _interp_point(0.22) - 0.90 * d_off * n_hat
             _add_triangle_safe(c_t_sym[0], c_t_sym[1], 0.10 * path_span, 0.12 * path_span, angle_deg=-15.0)
@@ -475,18 +475,18 @@ def setup_environments_per_trajectory(histories: List[np.ndarray], titles: List[
             # - ASIMMETRIA totale (nessuna coppia speculare)
 
             # ZONA BASSA (Y=0.15-0.25) - 3 grandi ostacoli
-            _place_polygon_frac(env_case, b_left, b_bottom, b_right, b_top, path_line, path_buffer, 0.25, 0.18, 0.18, 0.15, -30.0, 'L')  # GRANDE L sinistra
+            _place_polygon_frac(env_case, b_left, b_bottom, b_right, b_top, path_line, path_buffer, 0.25, 0.23, 0.18, 0.15, -30.0, 'L')  # GRANDE L sinistra
             _place_polygon_frac(env_case, b_left, b_bottom, b_right, b_top, path_line, path_buffer, 0.70, 0.22, 0.16, 0.14, 25.0, 'triangle')  # GRANDE triangolo destra
             _place_circle_frac(env_case, b_left, b_bottom, b_right, b_top, path_line, path_buffer, 0.15, 0.20, 0.065)  # GRANDE cerchio sinistra
 
             # ZONA MEDIO-BASSA (Y=0.35-0.45) - 3 grandi ostacoli
             _place_polygon_frac(env_case, b_left, b_bottom, b_right, b_top, path_line, path_buffer, 0.75, 0.38, 0.17, 0.14, 35.0, 'triangle')  # GRANDE triangolo destra
             _place_wall_frac(env_case, b_left, b_bottom, b_right, b_top, path_line, path_buffer, 0.20, 0.30, 0.26, 0.34, 0.05)  # Muro SPESSO sinistra
-            _place_polygon_frac(env_case, b_left, b_bottom, b_right, b_top, path_line, path_buffer, 0.85, 0.42, 0.16, 0.13, -25.0, 'L')  # L destra
+            _place_polygon_frac(env_case, b_left, b_bottom, b_right, b_top, path_line, path_buffer, 0.85, 0.95, 0.16, 0.13, -25.0, 'L')  # L destra
 
             # ZONA CENTRALE (Y=0.50-0.60) - 4 grandi ostacoli DISTINTIVI
             _place_circle_frac(env_case, b_left, b_bottom, b_right, b_top, path_line, path_buffer, 0.30, 0.52, 0.070)  # GRANDE cerchio sinistra
-            _place_polygon_frac(env_case, b_left, b_bottom, b_right, b_top, path_line, path_buffer, 0.72, 0.55, 0.18, 0.15, -20.0, 'L')  # GRANDE L destra
+            _place_polygon_frac(env_case, b_left, b_bottom, b_right, b_top, path_line, path_buffer, 0.72, 0.90, 0.18, 0.15, -20.0, 'L')  # GRANDE L destra
             #_place_wall_frac(env_case, b_left, b_bottom, b_right, b_top, path_line, path_buffer, 0.15, 0.56, 0.19, 0.60, 0.05)  # Muro sinistra
             _place_polygon_frac(env_case, b_left, b_bottom, b_right, b_top, path_line, path_buffer, 0.85, 0.58, 0.15, 0.13, 30.0, 'triangle')  # Triangolo destra
 
@@ -541,8 +541,8 @@ def setup_environments_per_trajectory(histories: List[np.ndarray], titles: List[
                               0.50, 0.66, 0.15, 0.15, 30.0, 'triangle')
 
             # Triangolo spigoloso nel centro del cerchio INFERIORE
-            _place_polygon_frac(env_case, b_left, b_bottom, b_right, b_top, path_line, path_buffer,
-                              0.50, 0.34, 0.15, 0.15, -30.0, 'triangle')
+            _place_circle_frac(env_case, b_left, b_bottom, b_right, b_top, path_line, path_buffer,
+                                0.40, 0.34, 0.04)
 
             # === OSTACOLI SECONDARI: pochi e ben distribuiti per riferimenti LIDAR ===
             # Muri laterali (solo 2, ben distanziati)
@@ -749,7 +749,7 @@ def setup_environments_per_trajectory(histories: List[np.ndarray], titles: List[
                 add_obstacle_frac(0.25, 0.25, 0.035, True)   # Basso-sinistra - OK
                 add_obstacle_frac(0.25, 0.75, 0.045, True)   # Alto-sinistra - OK
                 # RIMOSSO: add_obstacle_frac(0.75, 0.75, 0.035, True) - sovrapposto
-                # RIMOSSO: add_obstacle_frac(0.75, 0.25, 0.04, False) - sovrapposto
+                add_obstacle_frac(0.75, 0.25, 0.04, False)
                 add_obstacle_frac(0.5, 0.15, 0.03, False)    # Centro-basso - OK
                 add_obstacle_frac(0.5, 0.85, 0.04, False)    # Centro-alto - OK
                 add_obstacle_frac(0.35, 0.35, 0.025, True)   # Intermedio 1 - OK

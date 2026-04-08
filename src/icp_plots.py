@@ -1,13 +1,14 @@
 import os
 import numpy as np
 import matplotlib.pyplot as plt
+from typing import Optional
 from typing import Dict
 
 # Utility salvataggio
 
 def _ensure_dir(path: str):
-    os.makedirs(path, exist_ok=True)
-
+    if path:
+        os.makedirs(path, exist_ok=True)
 
 def _savefig(path: str, dpi: int = 140):
     # Disabilita temporaneamente la modalità interattiva per non mostrare finestre
